@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>API TEST</title>
+  <link rel="stylesheet" type="text/css" href="/style.css">
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-core/5.8.34/browser.min.js"></script>
+  <script type="text/babel">
+    const titles = {
+      '200': 'Success',
+      '201': 'Create',
+      '204': 'Updated (No Content)',
+      '400': 'Bad Request',
+      '401': 'Unauthorized',
+      '403': 'Forbidden',
+      '404': 'Resource Not Found',
+      '500': 'Internal Server Error',
+      '501': 'Not Implemented'
+    };
+    
+    function handleResponse(xhr) {
+      const status = xhr.status.toString();
+
+      // Grab the content section and update its contents
+      const content = document.querySelector("#content");
+      content.innerHTML = '<h1>' + titles[status] + '</h1>';
+      
+      // Only parse and add when data is called for (not HEAD)
+      if (xhr.response) {
+        const obj = JSON.parse(xhr.response);
+        content.innerHTML += '<p>' + JSON.stringify(obj) + '</p>';
+      }
+    };
+
+    function sendRequest(method, url, data) {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, url);
+      xhr.onload = () => handleResponse(xhr);
+      xhr.setRequestHeader('Accept', 'application/json');
+      
+      // Sending JSON if POST; nothing otherwise
+      if (method === 'POST') {
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(data);
+      }
+      else {
+        xhr.send();
+      }
+    };
+
+    const init = () => {
+      document.querySelector('#signupButton').addEventListener('click', (e) => {
+        const username = document.querySelector('#userField').value;
+        const password = document.querySelector('#passField').value;
+        
+        sendRequest('POST', '/createUser', JSON.stringify({ 'username': username, 'password': password }));
+      });
+      
+      document.querySelector('#uploadButton').addEventListener('click', () => {
+        const imageURL = document.querySelector('#imageField').value;
+        const tagList = document.querySelector('#tagsUField').value.split(' ');
+        
+        sendRequest('POST', '/addImage', JSON.stringify({ 'image': imageURL, 'tags': tagList }));
+      });
+
+      document.querySelector('#browseButton').addEventListener('click', () => {
+        // Arrays aren't real, and spaces are bad; I like tilde
+        const tagList = document.querySelector('#tagsBField').value.replace(' ', '~');
+        sendRequest('GET', `/getImages?tags=${tagList}`, null);
+      });
+    };
+
+    window.onload = init;
+  </script>
+</head>
+<body>
+  <section id="top">
+    <h1>API TEST</h1>
+    <h3>Sign Up</h3>
+    <span>Username: </span>
+    <input id="userField" type="text"/>
+    <span>Password: </span>
+    <input id="passField" type="password"/>
+    <button id="signupButton">Submit</button>
+    <br>
+
+    <h3>Upload</h3>
+    <span>Image URL: </span>
+    <input id="imageField" type="text"/>
+    <span>Tags: </span>
+    <input id="tagsUField" type="text"/>
+    <button id="uploadButton">Submit</button>
+    <br>
+
+    <h3>Browse</h3>
+    <span>Tags: </span>
+    <input id="tagsBField" type="text"/>
+    <button id="browseButton">Search</button>
+  </section>
+  <section id="content">
+  </section>
+</body>
+</html>
