@@ -1,164 +1,88 @@
 const http = require('http');
 const fs = require('fs');
 
+const commonLib = require('./common.js');
+const imageLib = require('./images.js');
+const userLib = require('./users.js');
+
 const port = process.env.PORT || process.env.NODE_PORT || 3000;
 
 // Load the html and css fles
 const indexHTML = fs.readFileSync(`${__dirname}/../client/client.html`);
 const indexCSS = fs.readFileSync(`${__dirname}/../client/style.css`);
 
-// TODO : Move helper stuff out
-
-// Pre-built object for 404 responses
-const notFoundObj = {
-  message: 'Page not found',
-  id: 'notFound',
-};
-
-// Map of all known users - { "username": { "password": password, ... }, ... }
-const users = {};
-
-// Array of all uploaded images - [ { "url": url, ... }, ... ]
-const images = [];
-
-// Generalized function for sending responses
-function sendResponse(request, response, statusCode, contentType, data) {
-  // Send data only if data is to be sent
-  if (contentType && data) {
-    response.writeHead(statusCode, { 'Content-Type': contentType });
-    response.write(data);
-  } else {
-    response.writeHead(statusCode);
-  }
-  response.end();
-}
-
-// Handle POST request data extraction
-function handlePOST(request, response, handler) {
-  const body = [];
-
-  // Call it a bad request if it errors out
-  request.on('error', () => {
-    sendResponse(request, response, 400, null, null);
-  });
-
-  // Collect the data
-  request.on('data', (chunk) => {
-    body.push(chunk);
-  });
-
-  // Handle the data once the stream finishes
-  request.on('end', () => {
-    // Put the data together
-    const data = JSON.parse(Buffer.concat(body).toString());
-    handler(request, response, data);
-  });
-}
-
-function parseQuery(reqURL) {
-  // Parse out the query
-  const parsed = {};
-
-  const requestSplit = reqURL.split('?');
-  const requestURL = requestSplit[0];
-  parsed.url = requestURL;
-  parsed.params = {};
-
-  // Extract query params
-  if (requestSplit.length > 1) {
-    const params = requestSplit[1].split('&');
-
-    for (let i = 0; i < params.length; ++i) {
-      const paramSplit = params[i].split('=');
-      if (paramSplit.length === 2) {
-        // Somehow this is considered preferable to doing it inline by airbnb
-        const pKey = paramSplit[0];
-        const pVal = paramSplit[1];
-        parsed.params[pKey] = pVal;
-      }
-    }
-  }
-
-  return parsed;
-}
-
-// Get an array of all images matching the specified tag list
-function matchImages(tagList) {
-  let matches = [];
-  for (let i = 0; i < images.length; ++i) {
-    if (tagList.every((tag) => { return images[i].tags.indexOf(tag) > -1; })) {
-      matches.push(images[i]);
-    }
-  }
-  return matches;
-}
-
-// Create a new user
-function createUser(request, response, data) {
-  // Sanity check the data
-  if (!data.username || !data.password) {
-    sendResponse(request, response, 400, 'application/json', JSON.stringify({
-      message: 'Username or password missing',
-      id: 'missingParams',
-    }));
-  }
-
-  // Send a 204 if the user already exists; otherwise add it to the list
-  if (users[data.username]) {
-    sendResponse(request, response, 204, null, null);
-  } else {
-    users[data.username] = { password: data.password };
-    sendResponse(request, response, 201, 'application/json', JSON.stringify({
-      message: 'Created successfully',
-    }));
-  }
-}
-
-// Add an image to the database; allowing identical images is intentional
-function addImage(request, response, data) {
-  // Sanity check the data
-  if (!data.image || !data.tags) {
-    sendResponse(request, response, 400, 'application/json', JSON.stringify({
-      message: 'Image missing',
-      id: 'missingParams',
-    }));
-  }
-
-  images.push({ url: data.image, tags: data.tags });
-  sendResponse(request, response, 201, 'application/json', JSON.stringify({
-    message: 'Created successfully',
-  }));
-}
-
+// Handle incoming requests
 function onRequest(request, response) {
-  const query = parseQuery(request.url);
-  console.log(query.url);
+  const query = commonLib.parseQuery(request.url);
+  const session = userLib.validateSession(request);
+  const authed = userLib.authorizeRequest(request, response, query.url, session);
+  if (!authed) { return; }
+
+  // Say no to content requests other than thosenthe server actually cares about
+  if (request.headers.accept
+     && request.headers.accept.includes('application/json')
+     && request.headers.accept.includes('text/html')
+     && request.headers.accept.includes('text/css')) {
+    commonLib.sendResponse(request, response, 400, 'application/json', JSON.stringify({
+      message: 'Invalid content request',
+      id: 'invalidParams',
+    }));
+  }
 
   // Inline the functionality into the switch (sendResponse does all the heavy lifting)
   switch (query.url) {
     case '/':
-      sendResponse(request, response, 200, 'text/html', indexHTML);
+      commonLib.sendResponse(request, response, 200, 'text/html', indexHTML);
       break;
     case '/style.css':
-      sendResponse(request, response, 200, 'text/css', indexCSS);
+      commonLib.sendResponse(request, response, 200, 'text/css', indexCSS);
       break;
     case '/createUser':
-      handlePOST(request, response, createUser);
+      commonLib.handlePOST(request, response, userLib.createUser);
+      break;
+    case '/authUser':
+      commonLib.handlePOST(request, response, userLib.authUser);
+      break;
+    case '/getSessionUser':
+      commonLib.sendResponse(request, response, 200, 'application/json', JSON.stringify({
+        user: userLib.sessions[session],
+      }));
       break;
     case '/addImage':
-      handlePOST(request, response, addImage);
+      commonLib.handlePOST(request, response, imageLib.validateImage);
       break;
     case '/getImages':
-      // TODO : Implement no-tag-query case in a cleaner way
+      // Sanity check the data
       if (query.params.tags) {
-        const matchedImages = matchImages(query.params.tags.split('~'));
-        sendResponse(request, response, 200, 'application/json', JSON.stringify(matchedImages));
+        const matchedImages = imageLib.matchImages(query.params.tags.split('~'));
+        commonLib.sendResponse(request, response, 200, 'application/json', JSON.stringify(matchedImages));
       } else {
-        sendResponse(request, response, 200, 'application/json', JSON.stringify(images));
+        commonLib.sendResponse(request, response, 200, 'application/json', JSON.stringify(imageLib.images));
       }
       break;
+    case '/getUploads':
+      // Sanity check the data
+      if (query.params.user) {
+        const matchedImages = imageLib.matchUploads(query.params.user);
+        commonLib.sendResponse(request, response, 200, 'application/json', JSON.stringify(matchedImages));
+      } else {
+        commonLib.sendResponse(request, response, 400, 'application/json', JSON.stringify({
+          message: 'Image or metadata missing',
+          id: 'missingParams',
+        }));
+      }
+      break;
+    case '/deleteImage':
+      commonLib.handlePOST(request, response, imageLib.deleteImage);
+      break;
+    case '/deleteUser':
+      commonLib.handlePOST(request, response, userLib.deleteUser);
+      break;
     default:
-      sendResponse(request, response, 404, 'application/json', JSON.stringify(notFoundObj));
+      commonLib.sendResponse(request, response, 404, 'application/json', JSON.stringify({
+        message: 'Page not found',
+        id: 'notFound',
+      }));
       break;
   }
 }

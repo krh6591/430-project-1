@@ -1,41 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>API TEST</title>
+  <title>ArtCache</title>
   <link rel="stylesheet" type="text/css" href="/style.css">
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-core/5.8.34/browser.min.js"></script>
   <script type="text/babel">
-    const titles = {
-      '200': 'Success',
-      '201': 'Create',
-      '204': 'Updated (No Content)',
-      '400': 'Bad Request',
-      '401': 'Unauthorized',
-      '403': 'Forbidden',
-      '404': 'Resource Not Found',
-      '500': 'Internal Server Error',
-      '501': 'Not Implemented'
-    };
+    let user = null;
+    let currentSection = '#home';
     
-    function handleResponse(xhr) {
-      const status = xhr.status.toString();
-
-      // Grab the content section and update its contents
-      const content = document.querySelector("#content");
-      content.innerHTML = '<h1>' + titles[status] + '</h1>';
-      
-      // Only parse and add when data is called for (not HEAD)
-      if (xhr.response) {
+    function getUser() {
+      sendRequest('GET', '/getSessionUser', (xhr) => {
         const obj = JSON.parse(xhr.response);
-        content.innerHTML += '<p>' + JSON.stringify(obj) + '</p>';
-      }
-    };
-
-    function sendRequest(method, url, data) {
+        if (obj.user) {
+          user = obj.user;
+        }
+      }, null);
+    }
+    
+    function sendRequest(method, url, handler, data) {
       const xhr = new XMLHttpRequest();
       xhr.open(method, url);
-      xhr.onload = () => handleResponse(xhr);
+      xhr.onload = () => handler(xhr);
       xhr.setRequestHeader('Accept', 'application/json');
       
       // Sending JSON if POST; nothing otherwise
@@ -47,27 +33,102 @@
         xhr.send();
       }
     };
+    
+    function changeSection(sec) {
+      document.querySelector(currentSection).style.display = 'none';
+      currentSection = sec;
+      document.querySelector(currentSection).style.display = 'block';
+    }
+    
+    function handleBrowse(xhr) {
+      if (!xhr.response) { document.querySelector('#results').innerHTML = ''; return; }
+      
+      const obj = JSON.parse(xhr.response);
+      console.log(obj);
+      
+      let newHTML = '';
+      for (let i = 0; i < obj.length; ++i) {
+        newHTML += '<div class="imgdsp"><img src="' + obj[i].url + '"></div>';
+        // newHTML += '<p>TEXT</p>'
+      }
+      document.querySelector('#results').innerHTML = newHTML;
+    }
+    
+    function handleUpload(xhr) {
+      if (xhr.status === 201) {
+        document.querySelector('#statusU').text = 'Upload succeeded';
+      }
+      else if (xhr.status === 403) {
+        document.querySelector('#statusU').text = 'Must be signed in to upload';
+      }
+      else {
+        document.querySelector('#statusU').text = 'Upload failed';
+      }
+    }
+    
+    function handleSignup(xhr) {
+      if (xhr.status === 204) {
+        document.querySelector('#statusL').text = 'Username already taken';
+      }
+      else if (xhr.status === 201) {
+        document.querySelector('#statusL').text = 'Signup succeeded';
+      }
+      else {
+        document.querySelector('#statusL').text = 'Signup failed';
+      }
+    }
+    
+    function handleLogin(xhr) {
+      if (xhr.status === 200) {
+        document.querySelector('#statusL').text = 'Logged in';
+        getUser();
+      }
+      else {
+        document.querySelector('#statusL').text = 'Login failed';
+      }
+    }
 
     const init = () => {
-      document.querySelector('#signupButton').addEventListener('click', (e) => {
-        const username = document.querySelector('#userField').value;
-        const password = document.querySelector('#passField').value;
-        
-        sendRequest('POST', '/createUser', JSON.stringify({ 'username': username, 'password': password }));
+      document.querySelector('#browseButton').addEventListener('click', () => {
+        // Arrays aren't real, and spaces are bad; I like tilde
+        const tagList = document.querySelector('#tagsBField').value.replace(' ', '~');
+        sendRequest('GET', `/getImages?tags=${tagList}`, handleBrowse, null);
+      });
+      
+      document.querySelector('#uploaderButton').addEventListener('click', () => {
+        // Arrays aren't real, and spaces are bad; I like tilde
+        const browseUser = document.querySelector('#userBField').value;
+        sendRequest('GET', `/getUploads?user=${browseUser}`, handleBrowse, null);
       });
       
       document.querySelector('#uploadButton').addEventListener('click', () => {
         const imageURL = document.querySelector('#imageField').value;
         const tagList = document.querySelector('#tagsUField').value.split(' ');
-        
-        sendRequest('POST', '/addImage', JSON.stringify({ 'image': imageURL, 'tags': tagList }));
+        sendRequest('POST', '/addImage', handleUpload, JSON.stringify({ 'image': imageURL, 'tags': tagList, 'uploader': user }));
       });
-
-      document.querySelector('#browseButton').addEventListener('click', () => {
-        // Arrays aren't real, and spaces are bad; I like tilde
-        const tagList = document.querySelector('#tagsBField').value.replace(' ', '~');
-        sendRequest('GET', `/getImages?tags=${tagList}`, null);
+      
+      document.querySelector('#signupButton').addEventListener('click', (e) => {
+        const username = document.querySelector('#userField').value;
+        const password = document.querySelector('#passField').value;
+        sendRequest('POST', '/createUser', handleSignup, JSON.stringify({ 'username': username, 'password': password }));
+        sendRequest('POST', '/authUser', handleLogin, JSON.stringify({ 'username': username, 'password': password }));
       });
+      
+      document.querySelector('#loginButton').addEventListener('click', (e) => {
+        const username = document.querySelector('#userField').value;
+        const password = document.querySelector('#passField').value;
+        sendRequest('POST', '/authUser', handleLogin, JSON.stringify({ 'username': username, 'password': password }));
+        getUser();
+      });
+      
+      document.querySelector('#browse').style.display = 'none';
+      document.querySelector('#upload').style.display = 'none';
+      document.querySelector('#login').style.display = 'none';
+      
+      document.querySelector('#homeSB').addEventListener('click', (e) => { changeSection('#home'); });
+      document.querySelector('#browseSB').addEventListener('click', (e) => { changeSection('#browse'); });
+      document.querySelector('#uploadSB').addEventListener('click', (e) => { changeSection('#upload'); });
+      document.querySelector('#loginSB').addEventListener('click', (e) => { changeSection('#login'); });
     };
 
     window.onload = init;
@@ -75,29 +136,64 @@
 </head>
 <body>
   <section id="top">
-    <h1>API TEST</h1>
-    <h3>Sign Up</h3>
-    <span>Username: </span>
-    <input id="userField" type="text"/>
-    <span>Password: </span>
-    <input id="passField" type="password"/>
-    <button id="signupButton">Submit</button>
-    <br>
-
-    <h3>Upload</h3>
-    <span>Image URL: </span>
-    <input id="imageField" type="text"/>
-    <span>Tags: </span>
-    <input id="tagsUField" type="text"/>
-    <button id="uploadButton">Submit</button>
-    <br>
-
+    <h1>ArtCache</h1>
+    <nav>
+      <p id="homeSB">Home</p>
+      <p id="browseSB">Browse</p>
+      <p id="uploadSB">Upload</p>
+      <p id="loginSB">Login</p>
+    </nav>
+  </section>
+  
+  <section id="home">
+    <h3>Home</h3>
+    <p>Welcome to ArtCache!</p>
+  </section>
+  
+  <section id="browse">
     <h3>Browse</h3>
     <span>Tags: </span>
     <input id="tagsBField" type="text"/>
+    <br>
     <button id="browseButton">Search</button>
+    <br>
+    <span>User: </span>
+    <input id="userBField" type="text"/>
+    <br>
+    <button id="uploaderButton">Search</button>
+    <br>
+    <span id="statusB"></span>
+    <br>
+    <div id="results"></div>
   </section>
-  <section id="content">
+  
+  <section id="upload">
+    <h3>Upload Image</h3>
+    <span>Image URL: </span>
+    <input id="imageField" type="text"/>
+    <br>
+    <span>Tags: </span>
+    <input id="tagsUField" type="text"/>
+    <br>
+    <button id="uploadButton">Submit</button>
+    <br>
+    <span id="statusU"></span>
+    <br>
+  </section>
+  
+  <section id="login">
+    <h3>Sign Up / Login</h3>
+    <span>Username: </span>
+    <input id="userField" type="text"/>
+    <br>
+    <span>Password: </span>
+    <input id="passField" type="password"/>
+    <br>
+    <button id="signupButton">Sign Up</button>
+    <button id="loginButton">Login</button>
+    <br>
+    <span id="statusL"></span>
+    <br>
   </section>
 </body>
 </html>
